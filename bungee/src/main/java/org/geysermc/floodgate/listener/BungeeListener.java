@@ -50,6 +50,7 @@ import org.geysermc.floodgate.config.ProxyFloodgateConfig;
 import org.geysermc.floodgate.skin.SkinApplier;
 import org.geysermc.floodgate.skin.SkinDataImpl;
 import org.geysermc.floodgate.util.LanguageManager;
+import org.geysermc.floodgate.util.MojangUtils;
 import org.geysermc.floodgate.util.ReflectionUtils;
 
 @SuppressWarnings("ConstantConditions")
@@ -79,6 +80,8 @@ public final class BungeeListener implements Listener {
     @Inject
     @Named("kickMessageAttribute")
     private AttributeKey<String> kickMessageAttribute;
+
+    @Inject private MojangUtils mojangUtils;
 
     @EventHandler(priority = EventPriority.LOWEST)
     public void onPreLogin(PreLoginEvent event) {
@@ -127,12 +130,28 @@ public final class BungeeListener implements Listener {
 
     @EventHandler(priority = EventPriority.LOWEST)
     public void onPostLogin(PostLoginEvent event) {
-        // To fix the February 2 2022 Mojang authentication changes
         if (!config.isSendFloodgateData()) {
             FloodgatePlayer player = api.getPlayer(event.getPlayer().getUniqueId());
-            if (player != null && !player.isLinked()) {
-                skinApplier.applySkin(player, new SkinDataImpl("", ""));
+
+            if (player == null) {
+                return;
             }
+
+            // Floodgate players are seen as offline mode players, meaning we have to look up
+            // the linked player's textures ourselves
+
+            if (!player.isLinked()) {
+                skinApplier.applySkin(player, SkinDataImpl.DEFAULT_SKIN);
+                return;
+            }
+
+            mojangUtils.asyncSkinFor(player.getJavaUniqueId())
+                    .thenAccept(skin -> skinApplier.applySkin(player, skin))
+                    .exceptionally(exception -> {
+                        logger.debug("Failed to get skin for player " + player.getJavaUniqueId() + ", applying default.", exception);
+                        skinApplier.applySkin(player, SkinDataImpl.DEFAULT_SKIN);
+                        return null;
+                    });
         }
     }
 
